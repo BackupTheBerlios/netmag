@@ -1,25 +1,5 @@
-Was passiert in WM_PAINT?
-- Initialisierung
-- Hole Ausmaße, hdc, hdc_copy und hbm von Schirm und Fenster und initialisiere
-Datenraum
-- Hole Mausposition und berechne Offsets
-- Führe Bildschirmveränderung durch (BitBlt etc.)
-- Aufräumen (hdc_copy, hdc, hbm)
+# vim:ts=4
 
-- Bitmap bm_screen;
-- Bitmap bm_window;
-- bm_init(&bm);    // 1+2
-- bm_getmap(&bm, NULL, sizex, sizey);
-- bm_getdata(&bm)
-- bm_getmap(&bm, hWnd, sizex, sizey);
-- do_transform(bm1.data, bm2.data);
-- bm_putdata(&bm);
-- bm_deinit(&bm);
-
-Class Bitmap
-{
-	Init(hwnd);
-	Cleanup();
-	GetData(x, y, width, height, numbytes);
-	SetData(x, y, width, height, numbytes);
-}
+2005.06.05
+- Make the program work
+- Use a transfer function to copy the data (which can be changed later)
