@@ -10,7 +10,7 @@
 #define GET_Y_LPARAM(u) (((DWORD)u) / 65536)
 #endif
 
-// This could be done with format options ("..."), but I'm too lazy now.
+/* This could be done with format options ("..."), but I'm too lazy now. */
 #define trace(str) wprint(__LINE__, str)
 #define traceint(str, n) wprinti(__LINE__, str, n)
 #define traceintint(str, n, o) wprintii(__LINE__, str, n, o)
@@ -138,13 +138,23 @@ static BOOL InitWindow(char* title, int width, int height)
     return TRUE; 
 }
 
-/* Draw our cursor */
-static void draw_cross(HDC hdc, int x, int y)
+static void bm_draw_line(DWORD * data, int x, int y, int len, int dx, int dy, int w, int h)
 {
-    MoveToEx(hdc, x-5, y-5, NULL);
-    LineTo  (hdc, x+6, y+6);
-    MoveToEx(hdc, x+5, y-5, NULL);
-    LineTo  (hdc, x-6, y+6);
+    int i;
+    assert(data, "a");
+    for (i = 0; i < len; i++, x+=dx, y+=dy)
+    {
+	if (x >= 0 && y >= 0 && x < w && y < h)
+	    data[x+y*w] = 0;
+    }
+}
+
+/* Draw our cursor */
+static void bm_draw_cross(DWORD * data, int x, int y, int w, int h)
+{
+    assert(data, "c");
+    bm_draw_line(data, x-5, y-5, 11, 1, 1, w, h);
+    bm_draw_line(data, x+5, y-5, 11, -1, 1, w, h);
 }
 
 /* Structure for our local copy of the bitmap data */
@@ -159,14 +169,14 @@ typedef struct
 /* The values are already initialized with NULL, because they're static */
 void bm_init(Data * d, int w, int h)
 {
-    // Data store too small -> realloc
+    /* Data store too small -> realloc */
     if (w*h > d->w*d->h)
     {
 	d->data = (DWORD *) realloc((void *) d->data, w * h * sizeof(DWORD));
     }
 
-    // Bitmap too small -> realloc
-    // We also realloc if the width changed
+    /* Bitmap too small -> realloc */
+    /* We also realloc if the width changed */
     if (w != d->w || h > d->h)
     {
 	HDC hdc = GetDC(NULL);
@@ -187,7 +197,7 @@ void bm_get(Data * d, HDC hdc, int x, int y, int w, int h)
     HDC hdc_c;
     HBITMAP hbm_old;
 
-    assert(d && d->hbm && d->data, "");
+    assert(d && d->hbm && d->data, "b");
     hdc_c = CreateCompatibleDC(hdc);
     hbm_old = (HBITMAP) SelectObject(hdc_c, d->hbm);
     BitBlt(hdc_c, 0, 0, w, h, hdc, x, y, SRCCOPY);
@@ -202,7 +212,7 @@ void bm_put(Data * d, HDC hdc, int x, int y, int w, int h)
     HDC hdc_c;
     HBITMAP hbm_old;
 
-    assert(d && d->hbm && d->data, "");
+    assert(d && d->hbm && d->data, "1");
     hdc_c = CreateCompatibleDC(hdc);
     hbm_old = (HBITMAP) SelectObject(hdc_c, d->hbm);
     SetBitmapBits(d->hbm, w * h * sizeof(DWORD), d->data);
@@ -218,7 +228,7 @@ void bm_transform(Data * src, Data * dst, int w, int h)
     DWORD * s = src->data;
     DWORD * d = dst->data;
 
-    assert(s && d, "");
+    assert(s && d, "2");
     while (len--)
     {
 	*d++ = *s++;
@@ -266,9 +276,6 @@ LRESULT CALLBACK WndProc(HWND hWnd,
 		if (sy < 0)
 		    sy = 0;
 
-		draw_cross(hdc, rect.right/2+dx+sx,
-			rect.bottom/2+dy+sy);
-
 		{
 		    static Data src, dst;
 
@@ -283,6 +290,9 @@ LRESULT CALLBACK WndProc(HWND hWnd,
 		    bm_get(&src, hdc_s, x, y, w, h);
 		    ReleaseDC(NULL, hdc_s);
 		    bm_transform(&src, &dst, w, h);
+
+		    bm_draw_cross(dst.data, w/2+dx+sx, h/2+dy+sy, w, h);
+
 		    bm_put(&dst, hdc, 0, 0, w, h);
 		}
 
@@ -422,7 +432,7 @@ int WINAPI WinMain( HINSTANCE hInstance,
     { 
 	if (bRet == -1)
 	{
-	    // handle the error and possibly exit
+	    /* handle the error and possibly exit */
 	}
 	else
 	{
