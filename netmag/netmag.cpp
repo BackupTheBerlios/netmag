@@ -10,6 +10,7 @@
 #define GET_Y_LPARAM(u) (((DWORD)u) / 65536)
 #endif
 
+// This could be done with format options ("..."), but I'm too lazy now.
 #define trace(str) wprint(__LINE__, str)
 #define traceint(str, n) wprinti(__LINE__, str, n)
 #define traceintint(str, n, o) wprintii(__LINE__, str, n, o)
@@ -20,20 +21,24 @@ static HINSTANCE hInstance;
 
 static int screenres_x;
 static int screenres_y;
-static const int dbglines_max = 4;
-static char * dbglines[dbglines_max];
+static const int dbglines_max = 2;
+static char * dbglines[dbglines_max+1];
 static int    dbglines_count;
 
+/* Output a line for debugging */
 static void wprint(const int line, const char * str)
 {
     int i;
     int len;
+    // static char buf[200];
 
     if (str == NULL)
     {
 	dbglines_count = 0;
 	return;
     }
+
+    // sprintf(buf, "%d: %s", line, str);
 
     dbglines_count++;
 
@@ -51,6 +56,7 @@ static void wprint(const int line, const char * str)
     strcpy(dbglines[dbglines_count-1], str);
 }
 
+/* Output an integer for debugging */
 void wprinti(const int line, const char * fmt, const int n)
 {
     char buf[200];
@@ -58,6 +64,7 @@ void wprinti(const int line, const char * fmt, const int n)
     wprint(line, buf);
 }
 
+/* Output two integers for debugging */
 void wprintii(const int line, const char * fmt, const int n, const int o)
 {
     char buf[200];
@@ -96,13 +103,14 @@ static BOOL InitWindow(char* title, int width, int height)
 
 	if (!RegisterClass(&wc)) 
 	{
-	    MessageBox(NULL,"Failed To Register The Window Class.","ERROR",MB_OK|MB_ICONEXCLAMATION);
+	    MessageBox(NULL, "Failed To Register The Window Class.", "ERROR",
+		    MB_OK | MB_ICONEXCLAMATION);
 	    return FALSE; 
 	}
     }
 
-    dwExStyle=WS_EX_APPWINDOW | WS_EX_WINDOWEDGE; 
-    dwStyle=WS_OVERLAPPEDWINDOW; 
+    dwExStyle = WS_EX_APPWINDOW | WS_EX_WINDOWEDGE; 
+    dwStyle = WS_OVERLAPPEDWINDOW; 
 
     AdjustWindowRectEx(&WindowRect, dwStyle, FALSE, dwExStyle); 
 
@@ -110,19 +118,12 @@ static BOOL InitWindow(char* title, int width, int height)
 	DestroyWindow(hWnd);
 
 
-    if (!(hWnd=CreateWindowEx( dwExStyle, 
-		    "OpenGL", 
-		    title, 
-		    dwStyle | 
-		    WS_CLIPSIBLINGS | 
-		    WS_CLIPCHILDREN, 
+    if (!(hWnd=CreateWindowEx( dwExStyle, "OpenGL", title, 
+		    dwStyle | WS_CLIPSIBLINGS | WS_CLIPCHILDREN, 
 		    CW_USEDEFAULT, CW_USEDEFAULT,
 		    WindowRect.right-WindowRect.left, 
 		    WindowRect.bottom-WindowRect.top, 
-		    NULL, 
-		    NULL, 
-		    hInstance, 
-		    NULL))) 
+		    NULL, NULL, hInstance, NULL))) 
     {
 	MessageBox(NULL,"Window Creation Error.","ERROR",MB_OK|MB_ICONEXCLAMATION);
 	return FALSE; 
@@ -137,6 +138,7 @@ static BOOL InitWindow(char* title, int width, int height)
     return TRUE; 
 }
 
+/* Draw our cursor */
 static void draw_cross(HDC hdc, int x, int y)
 {
     MoveToEx(hdc, x-5, y-5, NULL);
@@ -145,157 +147,83 @@ static void draw_cross(HDC hdc, int x, int y)
     LineTo  (hdc, x-6, y+6);
 }
 
-class Bitmap
+/* Structure for our local copy of the bitmap data */
+typedef struct 
 {
-    public:
-	HWND hwnd;
-	HBITMAP hbm;
-	void * data;
-	int width;
-       	int height;
-    public:
-	Bitmap()
-	{
-	    hbm = NULL;
-	    data = NULL;
-	}
-	~Bitmap()
-	{
-	    if (data)
-		free(data);
-	    if (hbm)
-		DeleteObject(hbm);
-	}
-	void Init(HWND hwnd)
-	{
-	    this->hwnd = hwnd;
-	}
+    int w, h;
+    DWORD * data;
+    HBITMAP hbm;
+} Data;
 
-	DWORD GetData(int x, int y, int width, int height)
-	{
-	    return NULL;
-	}
-
-    private:
-	void SetSize(int width, int height)
-	{
-	    HDC hdc = GetDC(NULL);
-	    if (hbm)
-		DeleteObject(hbm);
-	    hbm = CreateCompatibleBitmap(hdc, width, height);
-
-	    BITMAP bm;
-	    int ret;
-	    ret = GetObject(hbm, sizeof(bm), &bm);
-	    assert(ret, "No hbm info");
-	}
-};
-
-
-static bool bm_stage1(HWND hwnd, Bitmap * bm)
+/* Allocate bitmap and data for bitmap */
+/* The values are already initialized with NULL, because they're static */
+void bm_init(Data * d, int w, int h)
 {
-    bool update = false;
-    int newheight = 0;
-    int newwidth = 0;
-
-    if (!bm)
-	return false;
-
-    /* Get size of screen/window */
-    if (hwnd == NULL)
+    // Data store too small -> realloc
+    if (w*h > d->w*d->h)
     {
-	newwidth = screenres_x;
-	newheight = screenres_y;
-    }
-    else
-    {
-	RECT rect;
-	GetClientRect(hwnd, &rect);
-	newwidth = rect.right;
-	newheight = rect.bottom;
-    }
-    if (bm->width < newwidth || bm->height < newheight)
-	update = true;
-
-    /* Create new bitmap and data space */
-    if (update)
-    {
-	if (bm->hdc)
-	    ReleaseDC(hwnd, bm->hdc);
-	if (bm->hbm)
-	    DeleteObject(bm->hbm);
-	if (bm->hdc_copy)
-	    DeleteDC(bm->hdc_copy);
-
-	/* Get device context */
-	bm->hdc = GetDC(hwnd);
-	assert(bm->hdc, "No hdc");
-
-	/* Create copy */
-	bm->hdc_copy = CreateCompatibleDC(bm->hdc);
-	assert(bm->hdc_copy, "No hdc_copy");
-
-	if (bm->hbm)
-	    DeleteObject(bm->hbm);
-	bm->hbm = CreateCompatibleBitmap(bm->hdc, newwidth, newheight);
-	bm->width = newwidth;
-	bm->height = newheight;
-
-	BITMAP bmp;
-	GetObject(bm->hbm, sizeof(bmp), &bmp);
-	traceintint("bmPlanes: %d bmBitsPixel: %d",
-		bmp.bmPlanes, bmp.bmBitsPixel);
-	bm->data = (DWORD *) realloc((void *) bm->data, newwidth * newheight *
-		sizeof(DWORD));
+	d->data = (DWORD *) realloc((void *) d->data, w * h * sizeof(DWORD));
     }
 
-    /* Tell device context copy to use the bitmap */
-    bm->hbm_old = (HBITMAP) SelectObject(bm->hdc_copy, bm->hbm);
-
-    return false;
+    // Bitmap too small -> realloc
+    // We also realloc if the width changed
+    if (w != d->w || h > d->h)
+    {
+	HDC hdc = GetDC(NULL);
+	if (d->hbm)
+	    DeleteObject(d->hbm);
+	d->hbm = CreateCompatibleBitmap(hdc, w, h);
+	d->w = w;
+	d->h = h;
+	ReleaseDC(NULL, hdc);
+    }
+    assert(d->data, "realloc() failed");
+    assert(d->hbm, "CreateCompatibleBitmap() failed");
 }
 
-/* Called near the end of WM_PAINT. */
-static bool bm_stage2(Bitmap * bm)
+/* Copy the rectangle in hdc to the data in d */
+void bm_get(Data * d, HDC hdc, int x, int y, int w, int h)
 {
-    assert(bm && bm->hdc_copy && bm->hbm_old && bm->hbm, "Missing structures");
+    HDC hdc_c;
+    HBITMAP hbm_old;
 
-    SelectObject(bm->hdc_copy, bm->hbm_old);
-
-    return true;
+    assert(d && d->hbm && d->data, "");
+    hdc_c = CreateCompatibleDC(hdc);
+    hbm_old = (HBITMAP) SelectObject(hdc_c, d->hbm);
+    BitBlt(hdc_c, 0, 0, w, h, hdc, x, y, SRCCOPY);
+    GetBitmapBits(d->hbm, w * h * sizeof(DWORD), d->data);
+    SelectObject(hdc_c, hbm_old);
+    DeleteDC(hdc_c);
 }
 
-/* Copy bitmap from device to memory */
-static bool bm_get_data(Bitmap * bm, int off_x, int off_y, int size_x, int
-	size_y)
+/* Copy the data in d to the rectangle in hdc */
+void bm_put(Data * d, HDC hdc, int x, int y, int w, int h)
 {
-    BitBlt(bm->hdc_copy, off_x, off_y, 
-	    size_x, size_y,
-	    bm->hdc, 0, 0,
-	    SRCCOPY);
-    GetBitmapBits(bm->hbm, size_x * size_y * 4, bm->data);
-    return true;
+    HDC hdc_c;
+    HBITMAP hbm_old;
+
+    assert(d && d->hbm && d->data, "");
+    hdc_c = CreateCompatibleDC(hdc);
+    hbm_old = (HBITMAP) SelectObject(hdc_c, d->hbm);
+    SetBitmapBits(d->hbm, w * h * sizeof(DWORD), d->data);
+    BitBlt(hdc, x, y, w, h, hdc_c, 0, 0, SRCCOPY);
+    SelectObject(hdc_c, hbm_old);
+    DeleteDC(hdc_c);
 }
 
-/* Copy bitmap from memory to device */
-static bool bm_put_data(Bitmap * bm)
+/* Simply copy the data -- more advanced versions to follow */
+void bm_transform(Data * src, Data * dst, int w, int h)
 {
-    SetBitmapBits(bm->hbm, bm->width * bm->height * 4, bm->data);
-    BitBlt(bm->hdc, 0, 0, 
-	    bm->width, bm->height,
-	    bm->hdc_copy, 0, 0,
-	    SRCCOPY);
-    return true;
+    int len = w * h;
+    DWORD * s = src->data;
+    DWORD * d = dst->data;
+
+    assert(s && d, "");
+    while (len--)
+    {
+	*d++ = *s++;
+    }
 }
-/* The obvious. Might never be called for the lazy ones. */
-#if 0
-static bool bm_deinit(Bitmap * bm)
-{
-    if (bm && bm->data)
-	free((void *) bm->data);
-    return true;
-}
-#endif
 
 LRESULT CALLBACK WndProc(HWND hWnd,
 	UINT uMsg,
@@ -303,8 +231,6 @@ LRESULT CALLBACK WndProc(HWND hWnd,
 	LPARAM lParam)
 {
     static int start_y;
-    static Bitmap bm_screen; /* No need for bm_init(), because it's NULL */
-    static Bitmap bm_window; /* No need for bm_init(), because it's NULL */
 
     switch (uMsg)
     {
@@ -317,14 +243,8 @@ LRESULT CALLBACK WndProc(HWND hWnd,
 
 		hdc = BeginPaint(hWnd, &ps);
 
-		bm_stage1(NULL, &bm_screen);
-		bm_stage1(hWnd, &bm_window);
-
-		GetClientRect(hWnd, &rect);
 		SelectObject(hdc, GetStockObject(ANSI_VAR_FONT));
 
-
-		// int bla;
 		GetClientRect(hWnd, &rect);
 		POINT mousepos;
 		GetCursorPos(&mousepos);
@@ -346,14 +266,28 @@ LRESULT CALLBACK WndProc(HWND hWnd,
 		if (sy < 0)
 		    sy = 0;
 
-		bm_get_data(&bm_screen, x, y, rect.right, rect.bottom);
-		bm_put_data(&bm_window);
-
 		draw_cross(hdc, rect.right/2+dx+sx,
 			rect.bottom/2+dy+sy);
 
-		bm_stage2(&bm_window);
-		bm_stage2(&bm_screen);
+		{
+		    static Data src, dst;
+
+		    int w, h, x, y;
+		    w = rect.right;
+		    h = rect.bottom;
+		    x = mousepos.x-dx-sx-w/2;
+		    y = mousepos.y-dy-sy-h/2;
+		    bm_init(&src, w, h);
+		    bm_init(&dst, w, h);
+		    HDC hdc_s = GetDC(NULL);
+		    bm_get(&src, hdc_s, x, y, w, h);
+		    ReleaseDC(NULL, hdc_s);
+		    bm_transform(&src, &dst, w, h);
+		    bm_put(&dst, hdc, 0, 0, w, h);
+		}
+
+		// traceintint("dx: %d, dy: %d", dx, dy);
+		// traceintint("sx: %d, sy: %d", sx, sy);
 
 		int i;
 		for (i = 0; i < dbglines_count; i++)
