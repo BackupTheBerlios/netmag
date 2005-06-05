@@ -14,6 +14,9 @@ all: all-before netmag.exe all-after
 
 remake: clean all
 
+tags:
+	ctags *
+
 clean: clean-custom
 	rm -f $(OBJ) $(BIN)
 
