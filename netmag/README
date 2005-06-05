@@ -1,0 +1,30 @@
+About
+-----
+Currently the program is very similar to the Windows magnifier. It tracks the
+cursor and displays the region around the cursor in it's windows.
+
+There are two applications at the moment:
+
+1. Play around with it. As it copies it's own window, funny graphics effects
+are attained.
+
+2. Hop to graphics preferences and extend your desktop to 2 monitors, even if
+you only have one. The content of the second monitor can be viewed in netmag's
+window.
+
+
+Compilation
+-----------
+Please edit the Makefile as netmag uses mingw's includes and libs included in
+devcpp, even if I don't use devcpp (I prefer vim).
+
+You'll need either mingw or devcpp or cygwin. After porting to nmake and msvc,
+it should work easily with Microsofts Visual C++.
+
+Usage
+-----
+Just call the program. Clicking (X) or pressing ESC quits the program.
+
+Known Issues
+------------
+Currently only works with the desktop set to 32bit color depth.
