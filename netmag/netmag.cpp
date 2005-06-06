@@ -23,9 +23,11 @@ static int screenorg_x;
 static int screenorg_y;
 static int screenres_x;
 static int screenres_y;
-static const int dbglines_max = 5;
+static const int dbglines_max = 1;
 static char * dbglines[dbglines_max+1];
 static int    dbglines_count;
+static int transfunc_curr = 0;
+static int transfunc_count = 2;
 
 /* Output a line for debugging */
 static void wprint(const int line, const char * str)
@@ -140,14 +142,14 @@ static BOOL InitWindow(char* title, int width, int height)
     return TRUE; 
 }
 
-static void bm_draw_line(DWORD * data, int x, int y, int len, int dx, int dy, int w, int h)
+static void bm_draw_line(DWORD * data, int x, int y, int len, int dx, int dy, int w, int h, int color)
 {
     int i;
     assert(data, "a");
     for (i = 0; i < len; i++, x+=dx, y+=dy)
     {
 	if (x >= 0 && y >= 0 && x < w && y < h)
-	    data[x+y*w] = 0;
+	    data[x+y*w] = color;
     }
 }
 
@@ -155,8 +157,10 @@ static void bm_draw_line(DWORD * data, int x, int y, int len, int dx, int dy, in
 static void bm_draw_cross(DWORD * data, int x, int y, int w, int h)
 {
     assert(data, "c");
-    bm_draw_line(data, x-5, y-5, 11, 1, 1, w, h);
-    bm_draw_line(data, x+5, y-5, 11, -1, 1, w, h);
+    bm_draw_line(data, x-4, y-5, 11, 1, 1, w, h, 0);
+    bm_draw_line(data, x-5, y-5, 11, 1, 1, w, h, -1);
+    bm_draw_line(data, x+6, y-5, 11, -1, 1, w, h, 0);
+    bm_draw_line(data, x+5, y-5, 11, -1, 1, w, h, -1);
 }
 
 /* Structure for our local copy of the bitmap data */
@@ -169,7 +173,7 @@ typedef struct
 
 /* Allocate bitmap and data for bitmap */
 /* The values are already initialized with NULL, because they're static */
-void bm_init(Data * d, int w, int h)
+void bm_alloc(Data * d, const int w, const int h)
 {
     /* Data store too small -> realloc */
     if (w*h > d->w*d->h)
@@ -223,9 +227,37 @@ void bm_put(Data * d, HDC hdc, int x, int y, int w, int h)
     DeleteDC(hdc_c);
 }
 
-/* Simply copy the data -- more advanced versions to follow */
-void bm_transform(Data * src, Data * dst, int w, int h)
+/* Simply copy the data */
+void bm_transform_copy(Data * src, Data * dst, const HDC hdc, const
+	int w, const int h, const int mousex, const int mousey)
 {
+    int x, y, sx, sy;
+    int dx = 0;
+    int dy = 0;
+
+    x = mousex - w/2;
+    y = mousey - h/2;
+    if (x < screenorg_x) 
+	dx = x-screenorg_x;
+    if (y < screenorg_y)
+	dy = y-screenorg_y;
+
+    sx = mousex + w/2 - screenres_x - screenorg_x;
+    sy = mousey + h/2 - screenres_y - screenorg_y;
+    if (sx < 0)
+	sx = 0;
+    if (sy < 0)
+	sy = 0;
+
+    x = mousex-dx-sx-w/2;
+    y = mousey-dy-sy-h/2;
+    bm_alloc(src, w, h);
+    bm_alloc(dst, w, h);
+    HDC hdc_s = GetDC(NULL);
+    bm_get(src, hdc_s, x, y, w, h);
+    ReleaseDC(NULL, hdc_s);
+
+
     int len = w * h;
     DWORD * s = src->data;
     DWORD * d = dst->data;
@@ -235,6 +267,78 @@ void bm_transform(Data * src, Data * dst, int w, int h)
     {
 	*d++ = *s++;
     }
+
+    bm_draw_cross(dst->data, w/2+dx+sx, h/2+dy+sy, w, h);
+
+    bm_put(dst, hdc, 0, 0, w, h);
+}
+
+/* Zoom by a factor
+ * src, dst are shared static buffers for data
+ * hdc is the handle of our window's drawing context
+ * dst_w, dst_h are the width and height of our window
+ * mousex/y is the current mouse position */
+void bm_transform_zoom(Data * src, Data * dst, const HDC hdc, const
+	int dst_w, const int dst_h, const int mousex, const int mousey)
+{
+    int src_x, src_y;      /* Source window position */
+    int src_w, src_h;      /* Source window size */
+    int dst_x, dst_y;      /* Dest window pos */
+    int m_x1 = 0, m_y1 = 0;/* Shift to upper left of mouse pointer */
+    int m_x2, m_y2;        /* Shift to lower right of mouse pointer */
+
+    const int zoom_in = 2; /* Zoom factor is zoom_in/zoom_out */
+    const int zoom_out = 1;
+
+    int sx, sy;
+    int dx, dy;
+
+    src_x = mousex - dst_w*zoom_out/zoom_in/2;
+    src_y = mousey - dst_h*zoom_out/zoom_in/2;
+    src_w = dst_w*zoom_out/zoom_in;
+    src_h = dst_h*zoom_out/zoom_in;
+
+    if (src_x < screenorg_x) 
+	m_x1 = src_x-screenorg_x;
+    if (src_y < screenorg_y)
+	m_y1 = src_y-screenorg_y;
+
+    m_x2 = mousex + src_w/2 - screenres_x - screenorg_x;
+    m_y2 = mousey + src_h/2 - screenres_y - screenorg_y;
+    if (m_x2 < 0)
+	m_x2 = 0;
+    if (m_y2 < 0)
+	m_y2 = 0;
+
+    src_x = mousex-m_x1-m_x2-src_w/2;
+    src_y = mousey-m_y1-m_y2-src_h/2;
+
+    bm_alloc(src, src_w, src_h);
+    bm_alloc(dst, dst_w, dst_h);
+
+    HDC hdc_s = GetDC(NULL);
+    bm_get(src, hdc_s, src_x, src_y, src_w, src_h);
+    ReleaseDC(NULL, hdc_s);
+
+
+    DWORD * s = src->data;
+    DWORD * d = dst->data;
+
+    assert(s && d, "2");
+    for (dy = 0; dy < dst_h; dy++)
+    {
+	sy = dy*zoom_out/zoom_in;
+	for (dx = 0; dx < dst_w; dx++)
+	{
+	    sx = dx*zoom_out/zoom_in;
+	    d[dx+dy*dst_w] = s[sx+sy*src_w];
+	}
+    }
+
+
+    bm_draw_cross(dst->data, dst_w/2+(m_x1+m_x2)*zoom_in/zoom_out, dst_h/2+(m_y1+m_y2)*zoom_in/zoom_out, dst_w, dst_h);
+
+    bm_put(dst, hdc, 0, 0, dst_w, dst_h);
 }
 
 LRESULT CALLBACK WndProc(HWND hWnd,
@@ -250,65 +354,33 @@ LRESULT CALLBACK WndProc(HWND hWnd,
 	    {
 		PAINTSTRUCT ps;
 		HDC hdc;
-
 		RECT rect;
-
-		hdc = BeginPaint(hWnd, &ps);
-
-		SelectObject(hdc, GetStockObject(ANSI_VAR_FONT));
+		POINT mousepos;
+		static Data src, dst;
+		int i;
+		int w, h;
 
 		GetClientRect(hWnd, &rect);
-		POINT mousepos;
+		w = rect.right;
+		h = rect.bottom;
+
 		GetCursorPos(&mousepos);
-		int x, y, sx, sy;
-		int dx = 0;
-		int dy = 0;
 
-		x = mousepos.x - rect.right/2;
-		y = mousepos.y - rect.bottom/2;
-		if (x < screenorg_x) 
-		    dx = x-screenorg_x;
-		if (y < screenorg_y)
-		    dy = y-screenorg_y;
+		hdc = BeginPaint(hWnd, &ps);
+		SelectObject(hdc, GetStockObject(ANSI_VAR_FONT));
 
-		sx = mousepos.x + rect.right/2 - screenres_x - screenorg_x;
-		sy = mousepos.y + rect.bottom/2 - screenres_y - screenorg_y;
-		if (sx < 0)
-		    sx = 0;
-		if (sy < 0)
-		    sy = 0;
+		if (transfunc_curr == 1)
+		    bm_transform_copy(&src, &dst, hdc, w, h, mousepos.x, mousepos.y);
+		else if (transfunc_curr == 0)
+		    bm_transform_zoom(&src, &dst, hdc, w, h, mousepos.x, mousepos.y);
 
-		{
-		    static Data src, dst;
-
-		    int w, h, x, y;
-		    w = rect.right;
-		    h = rect.bottom;
-		    x = mousepos.x-dx-sx-w/2;
-		    y = mousepos.y-dy-sy-h/2;
-		    bm_init(&src, w, h);
-		    bm_init(&dst, w, h);
-		    HDC hdc_s = GetDC(NULL);
-		    bm_get(&src, hdc_s, x, y, w, h);
-		    ReleaseDC(NULL, hdc_s);
-		    bm_transform(&src, &dst, w, h);
-
-		    bm_draw_cross(dst.data, w/2+dx+sx, h/2+dy+sy, w, h);
-
-		    bm_put(&dst, hdc, 0, 0, w, h);
-		}
-
-		// traceintint("dx: %d, dy: %d", dx, dy);
-		// traceintint("sx: %d, sy: %d", sx, sy);
-
-		int i;
 		for (i = 0; i < dbglines_count; i++)
 		    TextOut(hdc, 0, (rect.bottom-13*(dbglines_count-i)),
 			    dbglines[i], strlen(dbglines[i]));
 
 		EndPaint(hWnd, &ps);
 
-		SetTimer(hWnd, 1, 30, NULL);
+		SetTimer(hWnd, 1, 30, NULL); /* ~33 FPS */
 
 	    }
 	    break;
@@ -328,8 +400,12 @@ LRESULT CALLBACK WndProc(HWND hWnd,
 
 	case WM_CHAR:
 	    if (wParam == VK_ESCAPE)
-	    {
 		PostMessage(hWnd, WM_QUIT, 0, 0);
+
+	    if (wParam == VK_SPACE)
+	    {
+		transfunc_curr = (transfunc_curr+1) % transfunc_count;
+		traceint("Current transfer function: %d", transfunc_curr);
 	    }
 	    break;
 
