@@ -19,9 +19,11 @@
 static HWND hWnd = NULL; 
 static HINSTANCE hInstance; 
 
+static int screenorg_x;
+static int screenorg_y;
 static int screenres_x;
 static int screenres_y;
-static const int dbglines_max = 2;
+static const int dbglines_max = 5;
 static char * dbglines[dbglines_max+1];
 static int    dbglines_count;
 
@@ -264,13 +266,13 @@ LRESULT CALLBACK WndProc(HWND hWnd,
 
 		x = mousepos.x - rect.right/2;
 		y = mousepos.y - rect.bottom/2;
-		if (x < 0) 
-		    dx = x;
-		if (y < 0)
-		    dy = y;
+		if (x < screenorg_x) 
+		    dx = x-screenorg_x;
+		if (y < screenorg_y)
+		    dy = y-screenorg_y;
 
-		sx = mousepos.x + rect.right/2 - screenres_x;
-		sy = mousepos.y + rect.bottom/2 - screenres_y;
+		sx = mousepos.x + rect.right/2 - screenres_x - screenorg_x;
+		sy = mousepos.y + rect.bottom/2 - screenres_y - screenorg_y;
 		if (sx < 0)
 		    sx = 0;
 		if (sy < 0)
@@ -417,14 +419,13 @@ int WINAPI WinMain( HINSTANCE hInstance,
 {
     MSG msg; 
 
-    if (!InitWindow("Magnifying Glass",320,256))
-    {
+    if (!InitWindow("Magnifying Glass",480,320))
 	return 0; 
-    }
 
-    screenres_x = GetDeviceCaps(GetDC(NULL), HORZRES);
-    screenres_y = GetDeviceCaps(GetDC(NULL), VERTRES)*2;
-
+    screenorg_x = GetSystemMetrics(SM_XVIRTUALSCREEN);
+    screenorg_y = GetSystemMetrics(SM_YVIRTUALSCREEN);
+    screenres_x = GetSystemMetrics(SM_CXVIRTUALSCREEN);
+    screenres_y = GetSystemMetrics(SM_CYVIRTUALSCREEN);
 
     BOOL bRet;
 
