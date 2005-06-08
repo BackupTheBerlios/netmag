@@ -29,8 +29,9 @@ static int    dbglines_count;
 static int transfunc_curr = 0;
 static int transfunc_count = 2;
 
-static int key_f[4];
-static int key_alt;
+static int key_f_down[12];
+static int key_f_up[12];
+static bool capture_keys = true;
 
 /* Output a line for debugging */
 static void wprint(const int line, const char * str)
@@ -49,12 +50,13 @@ static void wprint(const int line, const char * str)
 
     dbglines_count++;
 
-    if (dbglines_count >= dbglines_max)
+    if (dbglines_count > dbglines_max)
     {
 	free(dbglines[0]);
 	for (i = 1; i < dbglines_max; i++)
 	    dbglines[i-1] = dbglines[i];
 	dbglines_count--;
+	dbglines[dbglines_max-1] = NULL;
     }
 
     len = strlen(str);
@@ -178,6 +180,7 @@ typedef struct
 /* The values are already initialized with NULL, because they're static */
 void bm_alloc(Data * d, const int w, const int h)
 {
+    assert(w > 0 && h > 0, "Illegal width and/or height");
     /* Data store too small -> realloc */
     if (w*h > d->w*d->h)
     {
@@ -197,7 +200,13 @@ void bm_alloc(Data * d, const int w, const int h)
 	ReleaseDC(NULL, hdc);
     }
     assert(d->data, "realloc() failed");
-    assert(d->hbm, "CreateCompatibleBitmap() failed");
+    if (!d->hbm)
+    {
+	char buf[50];
+	sprintf(buf, "CreateCompatibleBitmap() failed: w: %d, h: %d", w, h);
+	assert(d->hbm, buf);
+    }
+    // assert(d->hbm, "CreateCompatibleBitmap() failed");
 }
 
 /* Copy the rectangle in hdc to the data in d */
@@ -276,6 +285,21 @@ void bm_transform_copy(Data * src, Data * dst, const HDC hdc, const
     bm_put(dst, hdc, 0, 0, w, h);
 }
 
+/* Find integers that are too big to handle */
+void reduce(int * one, int * two)
+{
+    int & a1 = *one;
+    int & a2 = *two;
+    
+    while (a1 && a2 && (a1 % 7) == 0 && (a2 % 7) == 0)
+	a1 /= 7, a2 /= 7;
+
+    while ((a1 && a2 && (a1 % 2 == 0) && (a2 % 2 == 0)) || a1 > 200 || a2 > 200)
+	a1 /= 2, a2 /= 2;
+    if (a1 == 0 || a2 == 0)
+	a1 = a2 = 1;
+}
+
 /* Zoom by a factor
  * src, dst are shared static buffers for data
  * hdc is the handle of our window's drawing context
@@ -290,11 +314,41 @@ void bm_transform_zoom(Data * src, Data * dst, const HDC hdc, const
     int m_x1 = 0, m_y1 = 0;/* Shift to upper left of mouse pointer */
     int m_x2, m_y2;        /* Shift to lower right of mouse pointer */
 
-    const int zoom_in = 2; /* Zoom factor is zoom_in/zoom_out */
-    const int zoom_out = 1;
+    static int zoom_in = 2; /* Zoom factor is zoom_in/zoom_out */
+    static int zoom_out = 1;
 
-    int sx, sy;
-    int dx, dy;
+    bool fkey = true;
+    if (key_f_down[0]) /* F1 pressed? */
+    {
+	zoom_in *= 2;
+	key_f_down[0] = 0;
+    }
+    else if (key_f_down[1]) /* F2 pressed? */
+    {
+	zoom_out *= 2;
+	key_f_down[1] = 0;
+    }
+    else if (key_f_down[2]) /* F3 pressed? */
+    {
+	zoom_in *= 8;
+	zoom_out *= 7;
+	key_f_down[2] = 0;
+    }
+    else if (key_f_down[3]) /* F4 pressed? */
+    {
+	zoom_in *= 7;
+	zoom_out *= 8;
+	key_f_down[3] = 0;
+    }
+    else
+	fkey = false;
+    if (fkey)
+    {
+	static char buf[50];
+	reduce(&zoom_in, &zoom_out);
+	sprintf(buf, "\rZoom: %.2lf (%d/%d)", zoom_in/(double) zoom_out, zoom_in, zoom_out);
+	trace(buf);
+    }
 
     src_x = mousex - dst_w*zoom_out/zoom_in/2;
     src_y = mousey - dst_h*zoom_out/zoom_in/2;
@@ -327,14 +381,19 @@ void bm_transform_zoom(Data * src, Data * dst, const HDC hdc, const
     DWORD * s = src->data;
     DWORD * d = dst->data;
 
+    int sx, sy;
+    int dx, dy;
+    int syw;
+
     assert(s && d, "2");
     for (dy = 0; dy < dst_h; dy++)
     {
 	sy = dy*zoom_out/zoom_in;
+	syw = sy*src_w;
 	for (dx = 0; dx < dst_w; dx++)
 	{
 	    sx = dx*zoom_out/zoom_in;
-	    d[dx+dy*dst_w] = s[sx+sy*src_w];
+	    d[dx+dy*dst_w] = s[sx+syw];
 	}
     }
 
@@ -396,14 +455,6 @@ LRESULT CALLBACK WndProc(HWND hWnd,
 	    UpdateWindow(hWnd);
 	    break;
 
-	    // case WM_SETFOCUS:
-	    // GetCapture();
-	    // break;
-	    // 
-	    // case WM_KILLFOCUS:
-	    // ReleaseCapture();
-	    // break;
-
 	case WM_CHAR:
 	    if (wParam == VK_ESCAPE)
 		PostMessage(hWnd, WM_QUIT, 0, 0);
@@ -411,7 +462,10 @@ LRESULT CALLBACK WndProc(HWND hWnd,
 	    if (wParam == VK_SPACE)
 	    {
 		transfunc_curr = (transfunc_curr+1) % transfunc_count;
-		traceint("Current transfer function: %d", transfunc_curr);
+		if (transfunc_curr == 0)
+		    trace("bm_transform_zoom");
+		if (transfunc_curr == 1)
+		    trace("bm_transform_copy");
 	    }
 	    break;
 
@@ -451,6 +505,10 @@ LRESULT CALLBACK WndProc(HWND hWnd,
 	    {
 		switch (wParam)
 		{
+		    case VK_F5:
+			capture_keys = !capture_keys;
+			traceint("Capturing F-keys is %s", (int) (capture_keys ? "On" : "Off"));
+			break;
 		    case VK_DOWN:
 			start_y -= 20;
 			InvalidateRect(hWnd, NULL, FALSE);
@@ -499,28 +557,22 @@ LRESULT CALLBACK KeyboardProc(int code, WPARAM wParam, LPARAM lParam)
     const KBDLLHOOKSTRUCT * kbh = (KBDLLHOOKSTRUCT *) lParam;
     const int key = kbh->vkCode;
 
-    if (wParam == WM_SYSKEYDOWN || wParam == WM_SYSKEYUP || wParam ==
-	    WM_KEYDOWN || wParam == WM_KEYUP)
+    if (capture_keys)
     {
-	traceintint("wParam: %d, key: %d", wParam, key);
-
-	if (key >= VK_F1 && key <= VK_F4)
+	if (key >= VK_F1 && key <= VK_F12)
 	{
 	    if (wParam == WM_KEYDOWN)
-		key_f[key-VK_F1] = 1;
+	    {
+		if (key == VK_F5)
+		{
+		    capture_keys = !capture_keys;
+		    traceint("Capturing F-keys is %s", (int) (capture_keys ? "On" : "Off"));
+		}
+		key_f_down[key-VK_F1] = 1;
+	    }
 	    else if (wParam == WM_KEYUP)
-		key_f[key-VK_F1] = 0;
-	    if (key_alt == 0)
-		return 1; /* F1-F4 is trapped, but not with Alt */
-	}
-
-	/* Alt is not trapped */
-	if (key == VK_MENU)
-	{
-	    if (wParam == WM_SYSKEYDOWN)
-		key_alt = 1;
-	    else if (wParam == WM_SYSKEYUP)
-		key_alt = 0;
+		key_f_up[key-VK_F1] = 1;
+	    return 1;
 	}
     }
 
@@ -538,6 +590,9 @@ int WINAPI WinMain( HINSTANCE hInstance,
     if (!InitWindow("Magnifying Glass",480,320))
 	return 0; 
 
+    trace("Press <Esc> to quit.");
+    trace("Press <Space> to toggle transfer functions.");
+    trace("Press <F5> to turn capturing F-keys off.");
     SetWindowsHookEx(WH_KEYBOARD_LL, KeyboardProc, hInstance, 0);
 
     screenorg_x = GetSystemMetrics(SM_XVIRTUALSCREEN);
