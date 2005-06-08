@@ -463,9 +463,9 @@ LRESULT CALLBACK WndProc(HWND hWnd,
 	    {
 		transfunc_curr = (transfunc_curr+1) % transfunc_count;
 		if (transfunc_curr == 0)
-		    trace("bm_transform_zoom");
+		    trace("bm_transform_zoom(): Adjustable zoom level. Press F1-F4 to zoom");
 		if (transfunc_curr == 1)
-		    trace("bm_transform_copy");
+		    trace("bm_transform_copy(): Simple 1:1 copy");
 	    }
 	    break;
 
