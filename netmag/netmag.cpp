@@ -23,11 +23,14 @@ static int screenorg_x;
 static int screenorg_y;
 static int screenres_x;
 static int screenres_y;
-static const int dbglines_max = 1;
+static const int dbglines_max = 5;
 static char * dbglines[dbglines_max+1];
 static int    dbglines_count;
 static int transfunc_curr = 0;
 static int transfunc_count = 2;
+
+static int key_f[4];
+static int key_alt;
 
 /* Output a line for debugging */
 static void wprint(const int line, const char * str)
@@ -283,7 +286,7 @@ void bm_transform_zoom(Data * src, Data * dst, const HDC hdc, const
 {
     int src_x, src_y;      /* Source window position */
     int src_w, src_h;      /* Source window size */
-    int dst_x, dst_y;      /* Dest window pos */
+    // int dst_x, dst_y;      /* Dest window pos */
     int m_x1 = 0, m_y1 = 0;/* Shift to upper left of mouse pointer */
     int m_x2, m_y2;        /* Shift to lower right of mouse pointer */
 
@@ -336,7 +339,8 @@ void bm_transform_zoom(Data * src, Data * dst, const HDC hdc, const
     }
 
 
-    bm_draw_cross(dst->data, dst_w/2+(m_x1+m_x2)*zoom_in/zoom_out, dst_h/2+(m_y1+m_y2)*zoom_in/zoom_out, dst_w, dst_h);
+    bm_draw_cross(dst->data, dst_w/2+(m_x1+m_x2)*zoom_in/zoom_out,
+	    dst_h/2+(m_y1+m_y2)*zoom_in/zoom_out, dst_w, dst_h);
 
     bm_put(dst, hdc, 0, 0, dst_w, dst_h);
 }
@@ -352,6 +356,8 @@ LRESULT CALLBACK WndProc(HWND hWnd,
     {
 	case WM_PAINT:
 	    {
+		// traceintint("f1: %d, alt: %d", key_f[0], key_alt);
+
 		PAINTSTRUCT ps;
 		HDC hdc;
 		RECT rect;
@@ -484,9 +490,43 @@ LRESULT CALLBACK WndProc(HWND hWnd,
 	    }
     }
 
-
     return DefWindowProc(hWnd,uMsg,wParam,lParam);
 }
+
+/* Are the keys F1-F4 & Alt pressed? */
+LRESULT CALLBACK KeyboardProc(int code, WPARAM wParam, LPARAM lParam)
+{
+    const KBDLLHOOKSTRUCT * kbh = (KBDLLHOOKSTRUCT *) lParam;
+    const int key = kbh->vkCode;
+
+    if (wParam == WM_SYSKEYDOWN || wParam == WM_SYSKEYUP || wParam ==
+	    WM_KEYDOWN || wParam == WM_KEYUP)
+    {
+	traceintint("wParam: %d, key: %d", wParam, key);
+
+	if (key >= VK_F1 && key <= VK_F4)
+	{
+	    if (wParam == WM_KEYDOWN)
+		key_f[key-VK_F1] = 1;
+	    else if (wParam == WM_KEYUP)
+		key_f[key-VK_F1] = 0;
+	    if (key_alt == 0)
+		return 1; /* F1-F4 is trapped, but not with Alt */
+	}
+
+	/* Alt is not trapped */
+	if (key == VK_MENU)
+	{
+	    if (wParam == WM_SYSKEYDOWN)
+		key_alt = 1;
+	    else if (wParam == WM_SYSKEYUP)
+		key_alt = 0;
+	}
+    }
+
+    return CallNextHookEx(NULL, code, wParam, lParam);
+}
+
 
 int WINAPI WinMain( HINSTANCE hInstance, 
 	HINSTANCE hPrevInstance, 
@@ -497,6 +537,8 @@ int WINAPI WinMain( HINSTANCE hInstance,
 
     if (!InitWindow("Magnifying Glass",480,320))
 	return 0; 
+
+    SetWindowsHookEx(WH_KEYBOARD_LL, KeyboardProc, hInstance, 0);
 
     screenorg_x = GetSystemMetrics(SM_XVIRTUALSCREEN);
     screenorg_y = GetSystemMetrics(SM_YVIRTUALSCREEN);
