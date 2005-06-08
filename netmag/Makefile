@@ -13,8 +13,8 @@ all: netmag.exe
 
 remake: clean all
 
-tags:
-	ctags *
+tags: netmag.cpp
+	ctags netmag.cpp
 
 clean:
 	rm -f $(OBJ) $(BIN) $(DUMP)
