@@ -8,6 +8,12 @@
 - Select transfer functions
 - New transfer function zoom
 
+2005.06.07
+- Use hook function to capture F-keys.
+
+2005.06.08
+- Use F-keys to zoom in and out.
+
 Plans:
 - show help window on key F1 or h
 - load & save (& alter) settings
