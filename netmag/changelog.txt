@@ -14,7 +14,17 @@
 2005.06.08
 - Use F-keys to zoom in and out.
 
+2005.06.11
+- functions bm_transfer -> class Transfer
+
+2005.06.12
+- started Transform_zoom_aa() for anti-aliasing
+
+2005.06.13
+- finished anti-aliasing algorithm
+
 Plans:
 - show help window on key F1 or h
 - load & save (& alter) settings
+- Render text in hdc_copy (no flicker)
 
