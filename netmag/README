@@ -1,7 +1,11 @@
 About
 -----
 Currently the program is very similar to the Windows magnifier. It tracks the
-cursor and displays the region around the cursor in it's windows.
+cursor and displays the region around the cursor in it's windows. While the
+Windows magnifier only zooms in integrals >= 1 (1:1, 1:2, 1:4, ...), netmag
+allows for more zoom factors and for shrinking, too (1:3.24, 1.5:1, 2:1, ...).
+To do so successfully, netmag supports anti aliasing. However, staying in
+integral factors speeds up zooming.
 
 There are two applications at the moment:
 
@@ -15,15 +19,15 @@ window.
 
 Compilation
 -----------
-Please edit the Makefile as netmag uses mingw's includes and libs included in
-devcpp, even if I don't use devcpp (I prefer vim).
-
-You'll need either mingw or devcpp or cygwin. After porting to nmake and msvc,
-it should work easily with Microsofts Visual C++.
+At the moment, netmag uses cygwin1.dll, only to be able to compile with gcc. The
+makefile will probably not work out of the box, unless you use DevC++ in it's
+default path, but as it's only one big file, it shouldn't be a problem to adopt
+it to other compilers.
 
 Usage
 -----
-Just call the program. Clicking (X) or pressing ESC quits the program.
+Just call the program. Clicking (X) or pressing ESC or Q quits the program, H
+will call the help screen (I'll implement that today).
 
 Known Issues
 ------------
