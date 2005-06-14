@@ -23,8 +23,11 @@
 2005.06.13
 - finished anti-aliasing algorithm
 
+2005.06.14
+- render text in hdc_copy (no flicker)
+- slowly move out old messages
+- show help window on key h
+
 Plans:
-- show help window on key F1 or h
 - load & save (& alter) settings
-- Render text in hdc_copy (no flicker)
 
