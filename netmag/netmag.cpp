@@ -16,6 +16,8 @@
 #define traceintint(str, n, o) wprintii(__LINE__, str, n, o)
 #define assert(var, text) if (!var) trace(text); else
 
+static FILE * pr;
+
 static HWND hWnd = NULL; 
 static HINSTANCE hInstance; 
 
@@ -27,11 +29,19 @@ static const int dbglines_max = 5;
 static char * dbglines[dbglines_max+1];
 static int    dbglines_count;
 static int transfunc_curr = 0;
-static int transfunc_count = 2;
+static const int transfunc_count = 3;
 
 static int key_f_down[12];
 static int key_f_up[12];
 static bool capture_keys = true;
+
+/* Structure for our local copy of the bitmap data */
+typedef struct 
+{
+    int w, h;
+    DWORD * data;
+    HBITMAP hbm;
+} Data;
 
 /* Output a line for debugging */
 static void wprint(const int line, const char * str)
@@ -168,14 +178,6 @@ static void bm_draw_cross(DWORD * data, int x, int y, int w, int h)
     bm_draw_line(data, x+5, y-5, 11, -1, 1, w, h, -1);
 }
 
-/* Structure for our local copy of the bitmap data */
-typedef struct 
-{
-    int w, h;
-    DWORD * data;
-    HBITMAP hbm;
-} Data;
-
 /* Allocate bitmap and data for bitmap */
 /* The values are already initialized with NULL, because they're static */
 void bm_alloc(Data * d, const int w, const int h)
@@ -239,52 +241,6 @@ void bm_put(Data * d, HDC hdc, int x, int y, int w, int h)
     DeleteDC(hdc_c);
 }
 
-/* Simply copy the data */
-void bm_transform_copy(Data * src, Data * dst, const HDC hdc, const
-	int w, const int h, const int mousex, const int mousey)
-{
-    int x, y, sx, sy;
-    int dx = 0;
-    int dy = 0;
-
-    x = mousex - w/2;
-    y = mousey - h/2;
-    if (x < screenorg_x) 
-	dx = x-screenorg_x;
-    if (y < screenorg_y)
-	dy = y-screenorg_y;
-
-    sx = mousex + w/2 - screenres_x - screenorg_x;
-    sy = mousey + h/2 - screenres_y - screenorg_y;
-    if (sx < 0)
-	sx = 0;
-    if (sy < 0)
-	sy = 0;
-
-    x = mousex-dx-sx-w/2;
-    y = mousey-dy-sy-h/2;
-    bm_alloc(src, w, h);
-    bm_alloc(dst, w, h);
-    HDC hdc_s = GetDC(NULL);
-    bm_get(src, hdc_s, x, y, w, h);
-    ReleaseDC(NULL, hdc_s);
-
-
-    int len = w * h;
-    DWORD * s = src->data;
-    DWORD * d = dst->data;
-
-    assert(s && d, "2");
-    while (len--)
-    {
-	*d++ = *s++;
-    }
-
-    bm_draw_cross(dst->data, w/2+dx+sx, h/2+dy+sy, w, h);
-
-    bm_put(dst, hdc, 0, 0, w, h);
-}
-
 /* Find integers that are too big to handle */
 void reduce(int * one, int * two)
 {
@@ -300,109 +256,390 @@ void reduce(int * one, int * two)
 	a1 = a2 = 1;
 }
 
+class Transformfunc
+{
+    public:
+	/* src, dst are shared static buffers for data
+	 * hdc is the handle of our window's drawing context
+	 * dst_w, dst_h are the width and height of our window
+	 * mousex/y is the current mouse position */
+	virtual bool Transform(Data * src, Data * dst, const HDC hdc, const int
+		w, const int h, const int mousex, const int mousey);
+	virtual bool Cleanup();
+
+	virtual const char * Name();
+};
+    
+/* Simple copy of one picture to the other */
+class Trans_copy : public Transformfunc
+{
+    public:
+	const char * Name()
+	{
+	    return "Copy";
+	}
+
+	/* Simply copy the data */
+	bool Transform(Data * src, Data * dst, const HDC hdc, const int w,
+		const int h, const int mousex, const int mousey)
+	{
+	    int x, y, sx, sy;
+	    int dx = 0;
+	    int dy = 0;
+
+	    x = mousex - w/2;
+	    y = mousey - h/2;
+	    if (x < screenorg_x) 
+		dx = x-screenorg_x;
+	    if (y < screenorg_y)
+		dy = y-screenorg_y;
+
+	    sx = mousex + w/2 - screenres_x - screenorg_x;
+	    sy = mousey + h/2 - screenres_y - screenorg_y;
+	    if (sx < 0)
+		sx = 0;
+	    if (sy < 0)
+		sy = 0;
+
+	    x = mousex-dx-sx-w/2;
+	    y = mousey-dy-sy-h/2;
+	    bm_alloc(src, w, h);
+	    bm_alloc(dst, w, h);
+	    HDC hdc_s = GetDC(NULL);
+	    bm_get(src, hdc_s, x, y, w, h);
+	    ReleaseDC(NULL, hdc_s);
+
+
+	    int len = w * h;
+	    DWORD * s = src->data;
+	    DWORD * d = dst->data;
+
+	    assert(s && d, "2");
+	    while (len--)
+	    {
+		*d++ = *s++;
+	    }
+
+	    bm_draw_cross(dst->data, w/2+dx+sx, h/2+dy+sy, w, h);
+
+	    bm_put(dst, hdc, 0, 0, w, h);
+
+	    return true;
+	}
+
+	bool Cleanup()
+	{
+	    /* Nothing to do */
+	    return true;
+	}
+};
+
 /* Zoom by a factor
  * src, dst are shared static buffers for data
  * hdc is the handle of our window's drawing context
  * dst_w, dst_h are the width and height of our window
  * mousex/y is the current mouse position */
-void bm_transform_zoom(Data * src, Data * dst, const HDC hdc, const
-	int dst_w, const int dst_h, const int mousex, const int mousey)
+class Trans_zoom : public Transformfunc
 {
-    int src_x, src_y;      /* Source window position */
-    int src_w, src_h;      /* Source window size */
-    // int dst_x, dst_y;      /* Dest window pos */
-    int m_x1 = 0, m_y1 = 0;/* Shift to upper left of mouse pointer */
-    int m_x2, m_y2;        /* Shift to lower right of mouse pointer */
-
-    static int zoom_in = 2; /* Zoom factor is zoom_in/zoom_out */
-    static int zoom_out = 1;
-
-    bool fkey = true;
-    if (key_f_down[0]) /* F1 pressed? */
-    {
-	zoom_in *= 2;
-	key_f_down[0] = 0;
-    }
-    else if (key_f_down[1]) /* F2 pressed? */
-    {
-	zoom_out *= 2;
-	key_f_down[1] = 0;
-    }
-    else if (key_f_down[2]) /* F3 pressed? */
-    {
-	zoom_in *= 8;
-	zoom_out *= 7;
-	key_f_down[2] = 0;
-    }
-    else if (key_f_down[3]) /* F4 pressed? */
-    {
-	zoom_in *= 7;
-	zoom_out *= 8;
-	key_f_down[3] = 0;
-    }
-    else
-	fkey = false;
-    if (fkey)
-    {
-	static char buf[50];
-	reduce(&zoom_in, &zoom_out);
-	sprintf(buf, "\rZoom: %.2lf (%d/%d)", zoom_in/(double) zoom_out, zoom_in, zoom_out);
-	trace(buf);
-    }
-
-    src_x = mousex - dst_w*zoom_out/zoom_in/2;
-    src_y = mousey - dst_h*zoom_out/zoom_in/2;
-    src_w = dst_w*zoom_out/zoom_in;
-    src_h = dst_h*zoom_out/zoom_in;
-
-    if (src_x < screenorg_x) 
-	m_x1 = src_x-screenorg_x;
-    if (src_y < screenorg_y)
-	m_y1 = src_y-screenorg_y;
-
-    m_x2 = mousex + src_w/2 - screenres_x - screenorg_x;
-    m_y2 = mousey + src_h/2 - screenres_y - screenorg_y;
-    if (m_x2 < 0)
-	m_x2 = 0;
-    if (m_y2 < 0)
-	m_y2 = 0;
-
-    src_x = mousex-m_x1-m_x2-src_w/2;
-    src_y = mousey-m_y1-m_y2-src_h/2;
-
-    bm_alloc(src, src_w, src_h);
-    bm_alloc(dst, dst_w, dst_h);
-
-    HDC hdc_s = GetDC(NULL);
-    bm_get(src, hdc_s, src_x, src_y, src_w, src_h);
-    ReleaseDC(NULL, hdc_s);
-
-
-    DWORD * s = src->data;
-    DWORD * d = dst->data;
-
-    int sx, sy;
-    int dx, dy;
-    int syw;
-
-    assert(s && d, "2");
-    for (dy = 0; dy < dst_h; dy++)
-    {
-	sy = dy*zoom_out/zoom_in;
-	syw = sy*src_w;
-	for (dx = 0; dx < dst_w; dx++)
+    public:
+	const char * Name()
 	{
-	    sx = dx*zoom_out/zoom_in;
-	    d[dx+dy*dst_w] = s[sx+syw];
+	    return "Zoom";
 	}
-    }
+
+	bool Transform(Data * src, Data * dst, const HDC hdc, const
+		int dst_w, const int dst_h, const int mousex, const int mousey)
+	{
+	    int src_x, src_y;      /* Source window position */
+	    int src_w, src_h;      /* Source window size */
+	    // int dst_x, dst_y;      /* Dest window pos */
+	    int m_x1 = 0, m_y1 = 0;/* Shift to upper left of mouse pointer */
+	    int m_x2, m_y2;        /* Shift to lower right of mouse pointer */
+
+	    static int zoom_in = 2; /* Zoom factor is zoom_in/zoom_out */
+	    static int zoom_out = 1;
+
+	    bool fkey = true;
+	    if (key_f_down[0]) /* F1 pressed? */
+	    {
+		zoom_in *= 2;
+		key_f_down[0] = 0;
+	    }
+	    else if (key_f_down[1]) /* F2 pressed? */
+	    {
+		zoom_out *= 2;
+		key_f_down[1] = 0;
+	    }
+	    else if (key_f_down[2]) /* F3 pressed? */
+	    {
+		zoom_in *= 8;
+		zoom_out *= 7;
+		key_f_down[2] = 0;
+	    }
+	    else if (key_f_down[3]) /* F4 pressed? */
+	    {
+		zoom_in *= 7;
+		zoom_out *= 8;
+		key_f_down[3] = 0;
+	    }
+	    else
+		fkey = false;
+	    if (fkey)
+	    {
+		static char buf[50];
+		reduce(&zoom_in, &zoom_out);
+		sprintf(buf, "\rZoom: %.2lf (%d/%d)", zoom_in/(double) zoom_out, zoom_in, zoom_out);
+		trace(buf);
+	    }
+
+	    src_x = mousex - dst_w*zoom_out/zoom_in/2;
+	    src_y = mousey - dst_h*zoom_out/zoom_in/2;
+	    src_w = dst_w*zoom_out/zoom_in;
+	    src_h = dst_h*zoom_out/zoom_in;
+
+	    if (src_x < screenorg_x) 
+		m_x1 = src_x-screenorg_x;
+	    if (src_y < screenorg_y)
+		m_y1 = src_y-screenorg_y;
+
+	    m_x2 = mousex + src_w/2 - screenres_x - screenorg_x;
+	    m_y2 = mousey + src_h/2 - screenres_y - screenorg_y;
+	    if (m_x2 < 0)
+		m_x2 = 0;
+	    if (m_y2 < 0)
+		m_y2 = 0;
+
+	    src_x = mousex-m_x1-m_x2-src_w/2;
+	    src_y = mousey-m_y1-m_y2-src_h/2;
+
+	    bm_alloc(src, src_w, src_h);
+	    bm_alloc(dst, dst_w, dst_h);
+
+	    HDC hdc_s = GetDC(NULL);
+	    bm_get(src, hdc_s, src_x, src_y, src_w, src_h);
+	    ReleaseDC(NULL, hdc_s);
 
 
-    bm_draw_cross(dst->data, dst_w/2+(m_x1+m_x2)*zoom_in/zoom_out,
-	    dst_h/2+(m_y1+m_y2)*zoom_in/zoom_out, dst_w, dst_h);
+	    DWORD * s = src->data;
+	    DWORD * d = dst->data;
 
-    bm_put(dst, hdc, 0, 0, dst_w, dst_h);
+	    int sx, sy;
+	    int dx, dy;
+	    int syw;
+
+	    assert(s && d, "2");
+	    for (dy = 0; dy < dst_h; dy++)
+	    {
+		sy = dy*zoom_out/zoom_in;
+		syw = sy*src_w;
+		for (dx = 0; dx < dst_w; dx++)
+		{
+		    sx = dx*zoom_out/zoom_in;
+		    d[dx+dy*dst_w] = s[sx+syw];
+		}
+	    }
+
+	    bm_draw_cross(dst->data, dst_w/2+(m_x1+m_x2)*zoom_in/zoom_out,
+		    dst_h/2+(m_y1+m_y2)*zoom_in/zoom_out, dst_w, dst_h);
+
+	    bm_put(dst, hdc, 0, 0, dst_w, dst_h);
+
+	    return true;
+	}
+
+	bool Cleanup()
+	{
+	    /* Nothing to do */
+	    return true;
+	}
+};
+
+/* return floor(f) */
+// inline double l(double f)
+// {
+// return floor(f);
+// }
+
+/* return floor(f+0.999999) */
+inline double u(double f)
+{
+    return (double) (int) (f+1.00001);
 }
+
+/* Zoom by a factor with anti-aliasing */
+class Trans_zoom_aalias : public Transformfunc
+{
+    public:
+	const char * Name()
+	{
+	    return "Zoom with anti-aliasing";
+	}
+
+	bool Transform(Data * src, Data * dst, const HDC hdc, const
+		int dst_w, const int dst_h, const int mousex, const int mousey)
+	{
+	    int src_x, src_y;      /* Source window position */
+	    int src_w, src_h;      /* Source window size */
+	    // int dst_x, dst_y;      /* Dest window pos */
+	    int m_x1 = 0, m_y1 = 0;/* Shift to upper left of mouse pointer */
+	    int m_x2, m_y2;        /* Shift to lower right of mouse pointer */
+
+	    static int zoom_in = 2; /* Zoom factor is zoom_in/zoom_out */
+	    static int zoom_out = 1;
+
+	    bool fkey = true;
+	    if (key_f_down[0]) /* F1 pressed? */
+	    {
+		zoom_in *= 2;
+		key_f_down[0] = 0;
+	    }
+	    else if (key_f_down[1]) /* F2 pressed? */
+	    {
+		zoom_out *= 2;
+		key_f_down[1] = 0;
+	    }
+	    else if (key_f_down[2]) /* F3 pressed? */
+	    {
+		zoom_in *= 8;
+		zoom_out *= 7;
+		key_f_down[2] = 0;
+	    }
+	    else if (key_f_down[3]) /* F4 pressed? */
+	    {
+		zoom_in *= 7;
+		zoom_out *= 8;
+		key_f_down[3] = 0;
+	    }
+	    else
+		fkey = false;
+	    if (fkey)
+	    {
+		static char buf[50];
+		reduce(&zoom_in, &zoom_out);
+		sprintf(buf, "\rZoom: %.2lf (%d/%d)", zoom_in/(double) zoom_out, zoom_in, zoom_out);
+		trace(buf);
+	    }
+
+	    src_x = mousex - dst_w*zoom_out/zoom_in/2;
+	    src_y = mousey - dst_h*zoom_out/zoom_in/2;
+	    src_w = dst_w*zoom_out/zoom_in;
+	    src_h = dst_h*zoom_out/zoom_in;
+
+	    if (src_x < screenorg_x) 
+		m_x1 = src_x-screenorg_x;
+	    if (src_y < screenorg_y)
+		m_y1 = src_y-screenorg_y;
+
+	    m_x2 = mousex + src_w/2 - screenres_x - screenorg_x;
+	    m_y2 = mousey + src_h/2 - screenres_y - screenorg_y;
+	    if (m_x2 < 0)
+		m_x2 = 0;
+	    if (m_y2 < 0)
+		m_y2 = 0;
+
+	    src_x = mousex-m_x1-m_x2-src_w/2;
+	    src_y = mousey-m_y1-m_y2-src_h/2;
+
+	    bm_alloc(src, src_w, src_h);
+	    bm_alloc(dst, dst_w, dst_h);
+
+	    HDC hdc_s = GetDC(NULL);
+	    bm_get(src, hdc_s, src_x, src_y, src_w, src_h);
+	    ReleaseDC(NULL, hdc_s);
+
+
+	    DWORD * s = src->data;
+	    DWORD * d = dst->data;
+
+	    int sx, sy; /* Source coordinates */
+	    int dx, dy; /* Destination coordinates */
+	    int syw;
+	    double olx, oly; /* Source coordinates lower bound */
+	    double oux, ouy; /* Source coordinates upper bound */
+	    double ilx, ily; /* Source inner loop lower bound */
+	    double iux, iuy; /* Source inner loop upper bound */
+	    double f_x, f_y;   /* Adding factor */
+	    double n3 = zoom_in;
+	    double n5 = zoom_out;
+	    int i;
+	    int j;
+	    const int dst_size = dst_w*dst_h;
+
+	    for (j = 0; j < dst_size; j++)
+		d[j] = 0;
+	    i = 0;
+	    assert(s && d, "2");
+	    for (dy = 0; dy < dst_h; dy++)
+	    {
+		oly = 1.0*dy*n5/n3;
+		ouy = 1.0*(dy+1)*n5/n3;
+
+		ily = oly;
+
+		while (ily < ouy)  /* while there are sources for this pixel */
+		{
+		    if (i++ > 1000000)
+			exit(0);
+		    iuy = u(ily);
+		    if (iuy > ouy)
+			iuy = ouy;
+		    sy = (int) ily;
+		    f_y = (iuy-ily)*n3/n5;
+
+		    syw = sy*src_w;
+		    for (dx = 0; dx < dst_w; dx++)
+		    {
+			olx = 1.0*dx*n5/n3;
+			oux = 1.0*(dx+1)*n5/n3;
+
+			ilx = olx;
+
+			while (ilx < oux)  /* while there are sources for this pixel */
+			{
+			    // if (i++ > 30000)
+			    // exit(0);
+			    iux = u(ilx);
+			    if (iux > oux)
+				iux = oux;
+			    sx = (int) ilx;
+			    // fprintf(pr, "sx: %d, ilx: %lf\n", sx, ilx);
+			    f_x = (iux-ilx)*n3/n5;
+
+			    if (sx+syw >= 0 && sx+syw < src_w*src_h)
+			    {
+				DWORD w = s[sx+syw];
+				byte r = w & 255;
+				byte g = (w/256) & 255;
+				byte b = (w/65536) & 255;
+				double f = f_x * f_y;
+				byte nr = f*r;
+				byte ng = f*g;
+				byte nb = f*b;
+				d[dx+dy*dst_w] += nr+ng*256+nb*65536;
+			    }
+
+			    ilx = iux;
+			}
+		    }
+
+		ily = iuy;
+		}
+	    }
+
+	    bm_draw_cross(dst->data, dst_w/2+(m_x1+m_x2)*zoom_in/zoom_out,
+		    dst_h/2+(m_y1+m_y2)*zoom_in/zoom_out, dst_w, dst_h);
+
+	    bm_put(dst, hdc, 0, 0, dst_w, dst_h);
+
+	    return true;
+	}
+
+	bool Cleanup()
+	{
+	    /* Nothing to do */
+	    return true;
+	}
+};
 
 LRESULT CALLBACK WndProc(HWND hWnd,
 	UINT uMsg,
@@ -410,6 +647,7 @@ LRESULT CALLBACK WndProc(HWND hWnd,
 	LPARAM lParam)
 {
     static int start_y;
+    static Transformfunc * tr_f[transfunc_count];
 
     switch (uMsg)
     {
@@ -425,6 +663,13 @@ LRESULT CALLBACK WndProc(HWND hWnd,
 		int i;
 		int w, h;
 
+		if (!tr_f[0])
+		{
+		    tr_f[0] = new Trans_zoom_aalias();
+		    tr_f[1] = new Trans_zoom();
+		    tr_f[2] = new Trans_copy();
+		}
+
 		GetClientRect(hWnd, &rect);
 		w = rect.right;
 		h = rect.bottom;
@@ -434,10 +679,8 @@ LRESULT CALLBACK WndProc(HWND hWnd,
 		hdc = BeginPaint(hWnd, &ps);
 		SelectObject(hdc, GetStockObject(ANSI_VAR_FONT));
 
-		if (transfunc_curr == 1)
-		    bm_transform_copy(&src, &dst, hdc, w, h, mousepos.x, mousepos.y);
-		else if (transfunc_curr == 0)
-		    bm_transform_zoom(&src, &dst, hdc, w, h, mousepos.x, mousepos.y);
+		tr_f[transfunc_curr]->Transform(&src, &dst, hdc, w, h,
+			mousepos.x, mousepos.y);
 
 		for (i = 0; i < dbglines_count; i++)
 		    TextOut(hdc, 0, (rect.bottom-13*(dbglines_count-i)),
@@ -456,16 +699,15 @@ LRESULT CALLBACK WndProc(HWND hWnd,
 	    break;
 
 	case WM_CHAR:
-	    if (wParam == VK_ESCAPE)
+	    if (wParam == VK_ESCAPE || wParam == 'q')
 		PostMessage(hWnd, WM_QUIT, 0, 0);
+	    else if (wParam == 'c')
+		trace(NULL); /* clear messages */
 
-	    if (wParam == VK_SPACE)
+	    else if (wParam == VK_SPACE)
 	    {
 		transfunc_curr = (transfunc_curr+1) % transfunc_count;
-		if (transfunc_curr == 0)
-		    trace("bm_transform_zoom(): Adjustable zoom level. Press F1-F4 to zoom");
-		if (transfunc_curr == 1)
-		    trace("bm_transform_copy(): Simple 1:1 copy");
+		traceint("transfunc %s", (int) tr_f[transfunc_curr]->Name());
 	    }
 	    break;
 
@@ -586,6 +828,10 @@ int WINAPI WinMain( HINSTANCE hInstance,
 	int nCmdShow) 
 {
     MSG msg; 
+
+    pr = fopen("PR", "w");
+    if (!pr)
+	return 0;
 
     if (!InitWindow("Magnifying Glass",480,320))
 	return 0; 
