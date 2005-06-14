@@ -16,7 +16,7 @@
 #define traceintint(str, n, o) wprintii(__LINE__, str, n, o)
 #define assert(var, text) if (!var) trace(text); else
 
-static FILE * pr;
+// static FILE * pr;
 
 static HWND hWnd = NULL; 
 static HINSTANCE hInstance; 
@@ -25,7 +25,7 @@ static int screenorg_x;
 static int screenorg_y;
 static int screenres_x;
 static int screenres_y;
-static const int dbglines_max = 5;
+static const int dbglines_max = 9;
 static char * dbglines[dbglines_max+1];
 static int    dbglines_count;
 static int transfunc_curr = 0;
@@ -226,6 +226,14 @@ void bm_get(Data * d, HDC hdc, int x, int y, int w, int h)
     DeleteDC(hdc_c);
 }
 
+void bm_draw_text(HDC hdc, int height)
+{
+    int i;
+    for (i = 0; i < dbglines_count; i++)
+	TextOut(hdc, 0, (height-13*(dbglines_count-i)),
+		dbglines[i], strlen(dbglines[i]));
+}
+
 /* Copy the data in d to the rectangle in hdc */
 void bm_put(Data * d, HDC hdc, int x, int y, int w, int h)
 {
@@ -236,6 +244,8 @@ void bm_put(Data * d, HDC hdc, int x, int y, int w, int h)
     hdc_c = CreateCompatibleDC(hdc);
     hbm_old = (HBITMAP) SelectObject(hdc_c, d->hbm);
     SetBitmapBits(d->hbm, w * h * sizeof(DWORD), d->data);
+    SelectObject(hdc_c, GetStockObject(ANSI_VAR_FONT));
+    bm_draw_text(hdc_c, h);
     BitBlt(hdc, x, y, w, h, hdc_c, 0, 0, SRCCOPY);
     SelectObject(hdc_c, hbm_old);
     DeleteDC(hdc_c);
@@ -578,8 +588,6 @@ class Trans_zoom_aalias : public Transformfunc
 
 		while (ily < ouy)  /* while there are sources for this pixel */
 		{
-		    if (i++ > 1000000)
-			exit(0);
 		    iuy = u(ily);
 		    if (iuy > ouy)
 			iuy = ouy;
@@ -596,8 +604,6 @@ class Trans_zoom_aalias : public Transformfunc
 
 			while (ilx < oux)  /* while there are sources for this pixel */
 			{
-			    // if (i++ > 30000)
-			    // exit(0);
 			    iux = u(ilx);
 			    if (iux > oux)
 				iux = oux;
@@ -612,9 +618,9 @@ class Trans_zoom_aalias : public Transformfunc
 				byte g = (w/256) & 255;
 				byte b = (w/65536) & 255;
 				double f = f_x * f_y;
-				byte nr = f*r;
-				byte ng = f*g;
-				byte nb = f*b;
+				byte nr = (byte) (f*r);
+				byte ng = (byte) (f*g);
+				byte nb = (byte) (f*b);
 				d[dx+dy*dst_w] += nr+ng*256+nb*65536;
 			    }
 
@@ -660,7 +666,6 @@ LRESULT CALLBACK WndProc(HWND hWnd,
 		RECT rect;
 		POINT mousepos;
 		static Data src, dst;
-		int i;
 		int w, h;
 
 		if (!tr_f[0])
@@ -677,18 +682,23 @@ LRESULT CALLBACK WndProc(HWND hWnd,
 		GetCursorPos(&mousepos);
 
 		hdc = BeginPaint(hWnd, &ps);
-		SelectObject(hdc, GetStockObject(ANSI_VAR_FONT));
 
 		tr_f[transfunc_curr]->Transform(&src, &dst, hdc, w, h,
 			mousepos.x, mousepos.y);
 
-		for (i = 0; i < dbglines_count; i++)
-		    TextOut(hdc, 0, (rect.bottom-13*(dbglines_count-i)),
-			    dbglines[i], strlen(dbglines[i]));
-
 		EndPaint(hWnd, &ps);
 
-		SetTimer(hWnd, 1, 30, NULL); /* ~33 FPS */
+		const int frames = 30;
+
+		/* make old text move out of the screen slowly */
+		static int textmoveout = 0;
+		if (textmoveout++ > 2*frames) /* 1 second */
+		{
+		    textmoveout = 0;
+		    trace("");
+		}
+
+		SetTimer(hWnd, 1, 1000/frames, NULL); /* ~33 FPS */
 
 	    }
 	    break;
@@ -708,6 +718,15 @@ LRESULT CALLBACK WndProc(HWND hWnd,
 	    {
 		transfunc_curr = (transfunc_curr+1) % transfunc_count;
 		traceint("transfunc %s", (int) tr_f[transfunc_curr]->Name());
+	    }
+	    else if (wParam == 'h')
+	    {
+		trace("Press <Q> or <Esc> to quit");
+		trace("Press <F1>-<F4> to zoom in and out");
+		trace("Press <F5> to stop capturing F-keys in other applications");
+		trace("Press <Space> to toggle transform functions");
+		trace("Press <C> to clear text screen");
+		trace("Press <H> for help");
 	    }
 	    break;
 
@@ -829,16 +848,15 @@ int WINAPI WinMain( HINSTANCE hInstance,
 {
     MSG msg; 
 
-    pr = fopen("PR", "w");
-    if (!pr)
-	return 0;
+    // pr = fopen("PR", "w");
+    // if (!pr)
+    // return 0;
 
-    if (!InitWindow("Magnifying Glass",480,320))
+    // if (!InitWindow("Magnifying Glass",480,320))
+    if (!InitWindow("Magnifying Glass - press <H> for help",320,256))
 	return 0; 
 
-    trace("Press <Esc> to quit.");
-    trace("Press <Space> to toggle transfer functions.");
-    trace("Press <F5> to turn capturing F-keys off.");
+    trace("Press <H> for help");
     SetWindowsHookEx(WH_KEYBOARD_LL, KeyboardProc, hInstance, 0);
 
     screenorg_x = GetSystemMetrics(SM_XVIRTUALSCREEN);
